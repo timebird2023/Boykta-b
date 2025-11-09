@@ -31,11 +31,11 @@
   "crons": [
     {
       "path": "/api/post",
-      "schedule": "0 * * * *"
+      "schedule": "0 7 * * *"
     },
     {
       "path": "/api/send-notifications",
-      "schedule": "0 * * *"
+      "schedule": "0 7 * * *"
     }
   ]
 }
