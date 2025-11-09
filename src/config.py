@@ -5,8 +5,8 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent.parent
 load_dotenv(BASE_DIR / '.env')
 
-FACEBOOK_PAGE_ACCESS_TOKEN = os.getenv('FACEBOOK_PAGE_ACCESS_TOKEN', '')
-FACEBOOK_PAGE_ID = os.getenv('FACEBOOK_PAGE_ID', '')
+FACEBOOK_PAGE_ACCESS_TOKEN = os.getenv('FACEBOOK_PAGE_ACCESS_TOKEN', 'EAAOY2RA6HZCMBP7gRUZCgBkZBEE5YTKxj7BtXeY8PdAfDgatki7qbMZCvuXbdoXLZCwKkKFWdU9TuFe3D1OmT8nfeVvl8PuOvLxzcdLZBD3ZBGjhU0VvmyZApyHsrBwfhMLrrOZCzkw15T5viRGsOP1lgp6kZB7KFEmzptEjHIAShu8nGWIawjICnXfVVqlt03hcf4748ZCogZDZD')
+FACEBOOK_PAGE_ID = os.getenv('FACEBOOK_PAGE_ID', '876149952244490')
 VERIFY_TOKEN = os.getenv('VERIFY_TOKEN', 'boykta2025')
 DEVELOPER_NAME = os.getenv('DEVELOPER_NAME', 'Younes Laldji')
 DEVELOPER_FACEBOOK = os.getenv('DEVELOPER_FACEBOOK', 'https://www.facebook.com/2007younes')
