@@ -35,7 +35,7 @@
     },
     {
       "path": "/api/send-notifications",
-      "schedule": "0 6,17,22 * * *"
+      "schedule": "0 * * *"
     }
   ]
 }
