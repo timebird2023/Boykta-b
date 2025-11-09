@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/webhook.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "api/scheduler.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/webhook",
+      "dest": "api/webhook.py"
+    },
+    {
+      "src": "/api/post",
+      "dest": "api/scheduler.py"
+    },
+    {
+      "src": "/api/send-notifications",
+      "dest": "api/scheduler.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "api/webhook.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/post",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/send-notifications",
+      "schedule": "0 6,17,22 * * *"
+    }
+  ]
+}
