@@ -1,5 +1,7 @@
 {
   "rewrites": [
-    { "source": "/webhook", "destination": "/api/boykta.py" }
+    { "source": "/webhook", "destination": "/api/boykta.py" },
+    { "source": "/api/send_response", "destination": "/api/boykta.py" },
+    { "source": "/data/(.*)", "destination": "/data/$1" }
   ]
 }
