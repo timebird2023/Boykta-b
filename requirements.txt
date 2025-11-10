@@ -10,3 +10,4 @@ pytz
 requests
 pymongo
 dnspython
+mysql-connector-python
