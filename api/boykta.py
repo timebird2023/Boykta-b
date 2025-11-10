@@ -9,6 +9,7 @@ import mysql.connector
 from pathlib import Path
 
 app = Flask(__name__)
+# رفع مستوى تسجيل المعلومات لرؤية التفاصيل
 logging.basicConfig(level=logging.DEBUG) 
 
 # ==================== الإعدادات والثوابت ====================
@@ -18,11 +19,10 @@ PAGE_ACCESS_TOKEN_VALUE = "EAAOY2RA6HZCMBP7gRUZCgBkZBEE5YTKxj7BtXeY8PdAfDgatki7q
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN", PAGE_ACCESS_TOKEN_VALUE)
 FB_MESSAGES_API = "https://graph.facebook.com/v18.0/me/messages"
 FB_POSTING_API = f"https://graph.facebook.com/v18.0/{PAGE_ID}/feed" 
-FB_PROFILE_API = f"https://graph.facebook.com/v18.0/me/messenger_profile" # API لضبط القائمة الدائمة
 
 CRON_SECRET_TOKEN = os.environ.get("CRON_SECRET_TOKEN", "EXTERNAL_CRON_TRIGGER_2025")
 
-# ==================== إعدادات MySQL (بدون تغيير) ====================
+# ==================== إعدادات MySQL ====================
 DB_CONFIG = {
     'host': '91.99.159.222',
     'port': 3306,
@@ -32,12 +32,14 @@ DB_CONFIG = {
     'connect_timeout': 10
 }
 
-# ==================== إعدادات تحميل البيانات (بدون تغيير) ====================
+# ==================== إعدادات تحميل البيانات ====================
 DATA_DIR = Path(__file__).parent / 'data'
-APP_DATA = {} 
+APP_DATA = {} # القاموس العالمي لتخزين كل محتوى JSON المحمل
 
 def load_all_app_data():
-    """تحميل جميع ملفات JSON من المجلدات الفرعية."""
+    """
+    تحميل جميع ملفات JSON من المجلدات الفرعية مع تسجيل مفصل للأخطاء.
+    """
     global APP_DATA
     data = {}
     
@@ -51,8 +53,12 @@ def load_all_app_data():
         if folder_path.is_dir():
             folder_name = folder_path.name
             data[folder_name] = {}
+            logging.info(f"Loading data from folder: {folder_name}")
+            
+            json_files_found = 0
             
             for file_path in folder_path.glob("*.json"):
+                json_files_found += 1
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         data_key = file_path.stem
@@ -63,42 +69,58 @@ def load_all_app_data():
                 except Exception as e:
                     logging.error(f"  - ❌ FAILED to read file {file_path.name}: {e}")
             
+            if json_files_found == 0:
+                 logging.warning(f"  - ⚠️ WARNING: No .json files found in {folder_name}/")
+                 
             if data[folder_name]:
                 logging.info(f"✅ Folder '{folder_name}' loaded with {len(data[folder_name])} source(s).")
+            else:
+                 logging.info(f"Empty or failed to load data for folder '{folder_name}'.")
 
     APP_DATA = data
     logging.info(f"==================================================")
+    logging.info(f"✅ GLOBAL DATA LOAD COMPLETE. Final structure keys: {list(APP_DATA.keys())}")
     logging.info(f"✅ Keys in 'hadith': {list(APP_DATA.get('hadith', {}).keys())}")
     logging.info(f"✅ Keys in 'quran': {list(APP_DATA.get('quran', {}).keys())}")
+    logging.info(f"✅ Keys in 'azkar': {list(APP_DATA.get('azkar', {}).keys())}")
     logging.info(f"==================================================")
 
-# ==================== منطق استخراج المحتوى (بدون تغيير) ====================
+# ==================== منطق استخراج المحتوى (المُحدَّث) ====================
 
 def get_random_content():
-    """اختيار محتوى ديني عشوائي (آية، حديث) ونص مصدره."""
+    """
+    اختيار محتوى ديني عشوائي (آية، حديث) ونص مصدره.
+    تم تعديل هذه الدالة للتعامل مع بنية quran.json و hadith/*.json
+    """
     
+    # قائمة الفئات المتوفرة للنشر (القرآن والأحاديث)
     publishable_categories = ['hadith', 'quran']
+    
+    # فلترة الفئات المتاحة والتحقق من أنها غير فارغة
     valid_categories = [c for c in publishable_categories if c in APP_DATA and APP_DATA[c]]
     
     if not valid_categories:
         logging.error("ATTEMPT FAILED: No valid data found in APP_DATA for 'hadith' or 'quran'.")
         return "عفواً، لا توجد بيانات للنشر (hadith أو quran).", "System"
 
+    # اختيار فئة عشوائية (hadith أو quran)
     category = random.choice(valid_categories)
     sources = APP_DATA[category]
-    source_key = random.choice(list(sources.keys())) 
+    source_key = random.choice(list(sources.keys())) # مثلاً: qudsi40 أو quran
     source_data = sources[source_key]
     
     content_text = None
-    source_name = f"({category}/{source_key})"
-
+    
     if category == 'quran':
+        # بنية القرآن: قائمة سور، وكل سورة قائمة آيات، والآية تحتوي على 'text'
         try:
+            # اختيار سورة عشوائية
             random_surah = random.choice(source_data)
             surah_name = random_surah.get('name', 'سورة غير معروفة')
             verses = random_surah.get('verses', [])
             
             if verses:
+                # اختيار آية عشوائية
                 random_verse = random.choice(verses)
                 ayah_text = random_verse.get('text', 'آية غير متوفرة')
                 ayah_id = random_verse.get('id', 0)
@@ -110,11 +132,15 @@ def get_random_content():
             logging.error(f"Error processing Quran data: {e}")
             
     elif category == 'hadith':
+        # بنية الحديث: قاموس يحتوي على 'hadiths' وهي قائمة، والحديث يحتوي على 'arabic'
         try:
             hadiths_list = source_data.get('hadiths', [])
             if hadiths_list:
+                # اختيار حديث عشوائي
                 random_hadith = random.choice(hadiths_list)
                 hadith_text = random_hadith.get('arabic', 'حديث غير متوفر')
+                
+                # استخراج اسم المصدر لجعله أكثر وضوحاً
                 book_title = source_data.get('metadata', {}).get('arabic', {}).get('title', source_key)
                 
                 content_text = hadith_text
@@ -131,19 +157,29 @@ def get_random_content():
 
 
 def get_random_azkar():
-    """اختيار ذكر عشوائي من ملف azkar.json."""
+    """
+    اختيار ذكر عشوائي من ملف azkar.json.
+    تم تعديل هذه الدالة للتعامل مع بنية azkar.json (قائمة قوائم داخل مفتاح 'rows')
+    """
     if 'azkar' in APP_DATA and 'azkar' in APP_DATA['azkar']:
-        azkar_data = APP_DATA['azkar'].get('azkar', {})
+        azkar_data = APP_DATA['azkar'].get('azkar', {}) # الحصول على محتوى azkar.json
+
+        # افتراض أن الذكر موجود في مفتاح 'rows' كقائمة قوائم
         azkar_rows = azkar_data.get('rows', [])
         
         if azkar_rows and isinstance(azkar_rows, list):
+            # اختيار صف عشوائي
             random_row = random.choice(azkar_rows)
+            
+            # الذكر هو العنصر الثاني (Index 1) في الصف، مع التأكد من وجوده
             if len(random_row) > 1:
-                return random_row[1].strip()
+                zekr_text = random_row[1]
+                # إزالة أي مسافات زائدة
+                return zekr_text.strip()
             
     return "لا يوجد ذكر لارساله حالياً."
 
-# ==================== دوال قاعدة البيانات (بدون تغيير) ====================
+# ==================== دوال قاعدة البيانات (لم يتم تغييرها) ====================
 
 def get_db_connection():
     """إنشاء اتصال بقاعدة البيانات."""
@@ -155,7 +191,7 @@ def get_db_connection():
         return None
 
 def initialize_db():
-    """إنشاء جدول المشتركين إذا لم يكن موجوداً."""
+    """إنشاء جدول المشتركين إذا لم يكن موجوداً (يتم استدعاؤه عند بدء التشغيل)."""
     conn = get_db_connection()
     if conn:
         try:
@@ -199,7 +235,7 @@ def is_subscribed(user_id):
         return result and result['subscribed'] == 1
     return False
 
-# ==================== دوال الإرسال والنشر (بدون تغيير) ====================
+# ==================== دوال الإرسال والنشر (لم يتم تغييرها) ====================
 
 def send_message(recipient_id, message_data):
     """إرسال رسالة إلى الماسنجر."""
@@ -216,73 +252,66 @@ def post_to_page(message_text):
     except Exception as e:
         logging.error(f"Failed to post to page: {e}")
 
-# ==================== إعداد القائمة الدائمة (Persistent Menu) ====================
+# ==================== منطق الجدولة والنشر (لم يتم تغييرها) ====================
 
-def get_menu_structure(user_id):
-    """بناء هيكل القائمة الدائمة (تعتمد على حالة الاشتراك)."""
-    # بما أن القائمة الدائمة ثابتة، يجب أن نستخدم زرين لكل خيار (اشتراك/إلغاء)
-    # أو نستخدم زر واحد يؤدي إلى قائمة فرعية (الأفضل هو خيارين منفصلين هنا لتفادي التعقيد).
+def run_auto_post():
+    """تنفيذ النشر العشوائي (آية/حديث) على الصفحة كل ساعتين."""
+    content, source = get_random_content()
     
-    # القائمة الدائمة لا يمكن تخصيصها لكل مستخدم بناءً على حالة الاشتراك (is_subscribed)
-    # لذا سنستخدم خياراً واحداً يؤدي إلى رسالة تطلب تفعيل/إلغاء الاشتراك
+    message = f"**{content}**\n\nالمصدر: {source}\n\n#ناشر_الخير #بويكتا"
     
-    return [
-        {
-            'locale': 'default',
-            'composer_input_disabled': False, # السماح للمستخدم بالكتابة
-            'call_to_actions': [
-                {'title': '✅ تفعيل/إيقاف الإشعارات', 'type': 'postback', 'payload': 'ACTION_TOGGLE_SUBSCRIPTION'},
-                {'title': '📖 آية أو حديث عشوائي', 'type': 'postback', 'payload': 'ACTION_RANDOM_CONTENT'},
-                {'title': 'ℹ️ معلومات عن البوت', 'type': 'postback', 'payload': 'ACTION_INFO'}
-            ]
-        },
-        # يمكنك إضافة قائمة لمنطقة معينة (مثل ar_AR) إذا لزم الأمر
-    ]
+    logging.info(f"Attempting to post: {message}")
+    post_to_page(message)
+    
 
-def set_persistent_menu():
-    """
-    إرسال طلب API لتعيين القائمة الدائمة للصفحة. 
-    يجب استدعاؤها لمرة واحدة (مثلاً يدويًا أو عبر نقطة نهاية خاصة).
-    """
-    menu_payload = {
-        'persistent_menu': get_menu_structure(None)
-    }
+def run_subscription_messages():
+    """إرسال محتوى الأذكار للمشتركين."""
+    conn = get_db_connection()
+    if not conn: 
+        logging.error("Cannot connect to DB for subscription messages.")
+        return
     
+    azkar_content = get_random_azkar()
+    if azkar_content == "لا يوجد ذكر لارساله حالياً.":
+        logging.warning("No Azkar content available to send.")
+        conn.close()
+        return
+        
+    cursor = conn.cursor(dictionary=True)
     try:
-        response = requests.post(
-            FB_PROFILE_API, 
-            params={'access_token': PAGE_ACCESS_TOKEN}, 
-            json=menu_payload
-        )
-        response_data = response.json()
-        if response_data.get('result') == 'success':
-            logging.info("✅ Persistent Menu set successfully.")
-        else:
-            logging.error(f"❌ Failed to set Persistent Menu: {response_data}")
-            
-    except Exception as e:
-        logging.error(f"Failed to send Persistent Menu request: {e}")
+        cursor.execute("SELECT psid FROM subscribers WHERE subscribed = TRUE")
+        subscribers = cursor.fetchall()
+        
+        message_data = {'text': f"💬 ذكر اليوم:\n\n{azkar_content}\n\nلإيقاف الإشعارات اضغط على زر 'إيقاف الإشعارات' في القائمة الرئيسية."}
+        
+        for sub in subscribers:
+            send_message(sub['psid'], message_data)
+        
+        logging.info(f"Sent Azkar message to {len(subscribers)} subscribers.")
+        
+    except mysql.connector.Error as err:
+        logging.error(f"Error fetching subscribers: {err}")
+    finally:
+        conn.close()
 
-# ==================== منطق الردود والأزرار (تم التعديل) ====================
+# ==================== منطق الردود والأزرار (لم يتم تغييرها) ====================
 
-def send_initial_menu(sender_id, custom_message=None):
-    """
-    إرسال رسالة ترحيب وقائمة الأزرار التفاعلية (كبديل للقائمة الدائمة في بعض التطبيقات).
-    """
-    
-    # رسالة ترحيب بسيطة
-    message = custom_message if custom_message else "مرحباً! أنا بوت **ناشر الخير**، اختر من القائمة الدائمة بالأسفل (أو أرسل 'مساعدة')."
-    
-    # بناء الأزرار (نستخدمها كقالب للترحيب الأول أو في حالة عدم دعم القائمة الدائمة)
-    subscribed = is_subscribed(sender_id)
+def get_welcome_buttons(user_id):
+    """بناء الأزرار التفاعلية."""
+    subscribed = is_subscribed(user_id)
     sub_text = "🔔 إيقاف الإشعارات" if subscribed else "✅ تفعيل الإشعارات"
     sub_payload = "ACTION_UNSUBSCRIBE" if subscribed else "ACTION_SUBSCRIBE"
     
-    buttons = [
+    return [
         {'type': 'postback', 'title': sub_text, 'payload': sub_payload},
         {'type': 'postback', 'title': '📖 آية أو حديث عشوائي', 'payload': 'ACTION_RANDOM_CONTENT'},
-        {'type': 'postback', 'title': 'ℹ️ معلومات عن البوت', 'payload': 'ACTION_INFO'},
+        {'type': 'postback', 'title': 'ℹ️ معلومات عن البوت والمطور', 'payload': 'ACTION_INFO'},
     ]
+
+def send_initial_menu(sender_id, custom_message=None):
+    """إرسال رسالة الترحيب ووصف الخدمات."""
+    message = custom_message if custom_message else "مرحباً! أنا بوت **ناشر الخير**، نظام آلي لخدمة نشر المحتوى الديني الموثوق...\n\nاختر من القائمة أدناه:"
+    buttons = get_welcome_buttons(sender_id)
     
     message_data = {
         'attachment': {
@@ -296,25 +325,16 @@ def send_initial_menu(sender_id, custom_message=None):
     }
     send_message(sender_id, message_data)
 
-
 def handle_postback(sender_id, payload):
-    """معالجة حدث Postback (الأزرار من القائمة الدائمة أو القالب التفاعلي)."""
+    """معالجة حدث Postback (الأزرار)."""
     
     if payload == 'ACTION_SUBSCRIBE':
         toggle_subscription(sender_id, True)
-        send_message(sender_id, {'text': "تم تفعيل إشعارات الأذكار بنجاح! شكراً لك."})
+        send_initial_menu(sender_id, "تم تفعيل إشعارات الأذكار بنجاح! شكراً لك.")
     
     elif payload == 'ACTION_UNSUBSCRIBE':
         toggle_subscription(sender_id, False)
-        send_message(sender_id, {'text': "تم إيقاف إشعارات الأذكار بنجاح. يمكنك تفعيلها مجدداً من القائمة الدائمة."})
-    
-    # هذا الإجراء يتم استدعاؤه من القائمة الدائمة، ويتحقق من الحالة ويرسل الرد المناسب
-    elif payload == 'ACTION_TOGGLE_SUBSCRIPTION':
-        subscribed = is_subscribed(sender_id)
-        if subscribed:
-            send_initial_menu(sender_id, "حالة الاشتراك: مُفعَّل. هل تريد إلغاء الإشعارات؟")
-        else:
-            send_initial_menu(sender_id, "حالة الاشتراك: مُوقَف. هل تريد تفعيل إشعارات الأذكار؟")
+        send_initial_menu(sender_id, "تم إيقاف إشعارات الأذكار بنجاح. يمكنك تفعيلها مجدداً في أي وقت.")
         
     elif payload == 'ACTION_RANDOM_CONTENT':
         content, source = get_random_content()
@@ -326,7 +346,6 @@ def handle_postback(sender_id, payload):
         send_message(sender_id, {'text': info_message})
     
     else:
-        # عند أي postback غير معروف، نرسل القائمة البديلة (الأزرار التفاعلية)
         send_initial_menu(sender_id) 
 
 # ==================== نقاط النهاية (Endpoints) ====================
@@ -347,18 +366,13 @@ def handle_facebook_events():
         for entry in data['entry']:
             for event in entry.get('messaging', []):
                 sender_id = event['sender']['id']
-                
-                if event.get('postback'):
-                    handle_postback(sender_id, event['postback']['payload'])
-                
-                elif event.get('message'):
-                    # إرسال القائمة التفاعلية عند استلام أي رسالة نصية (لتلبية طلبك)
+                if event.get('message'):
                     send_initial_menu(sender_id)
-                    
+                elif event.get('postback'):
+                    handle_postback(sender_id, event['postback']['payload'])
     return "OK", 200
 
 @app.route('/api/trigger', methods=['GET'])
-# ... (بقية الدالة run_auto_post و run_subscription_messages بدون تغيير) ...
 def external_cron_trigger():
     """نقطة نهاية سري يُستخدم لاستدعاء الجدولة من خدمة خارجية."""
     if request.args.get('secret_token') != CRON_SECRET_TOKEN:
@@ -367,19 +381,13 @@ def external_cron_trigger():
     current_hour = datetime.datetime.now().hour
     
     if current_hour % 2 == 0:
-        # دوال النشر
-        # run_auto_post() 
-        pass # تم تعطيل النشر التلقائي مؤقتاً لتجنب النشر المتكرر أثناء الاختبار
+        run_auto_post()
     
-    # run_subscription_messages()
-    pass # تم تعطيل إرسال الأذكار مؤقتاً
+    run_subscription_messages()
         
     return jsonify({"status": "success", "triggered_at": datetime.datetime.now().isoformat()}), 200
 
 # 🚨 يتم استدعاء تهيئة قاعدة البيانات وتحميل البيانات عند بدء تشغيل الخادم 🚨
 initialize_db()
 load_all_app_data()
-# 🚨 هام: استدعاء دالة set_persistent_menu مرة واحدة فقط 🚨
-# يمكنك استدعاء set_persistent_menu() يدوياً في مكان ما أو إزالة التعليق من السطر التالي
-# set_persistent_menu() 
 
