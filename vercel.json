@@ -1,6 +1,27 @@
 {
-  "rewrites": [
-    { "source": "/webhook", "destination": "/api/boykta.py" },
-    { "source": "/api/trigger", "destination": "/api/boykta.py" }
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/boykta.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/publish",
+      "dest": "/api/boykta.py"
+    },
+    {
+      "src": "/send_subscriptions",
+      "dest": "/api/boykta.py"
+    },
+    {
+      "src": "/webhook",
+      "dest": "/api/boykta.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/boykta.py"
+    }
   ]
 }
