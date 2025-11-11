@@ -60,15 +60,15 @@ def update_publish_index(new_index):
 # --- وظائف المحتوى والمنشورات ---
 
 def load_data(file_key):
-    """تحميل بيانات ملف JSON المرفق."""
+    """تحميل بيانات ملف JSON المرفق بمرونة عالية لمنع التعطل."""
     file_path = FILES.get(file_key)
     if not file_path: return None
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        # طباعة الخطأ في سجلات Vercel إذا لم يتم العثور على ملف
-        print(f"Error loading data file: {file_path}. Error: {e}")
+        # إذا فشل التحميل، نُسجل الخطأ ونُرجع None ونمنع تعطل البوت
+        print(f"CRITICAL ERROR: Failed to load data file {file_path}. Error: {e}")
         return None
 
 def get_random_post_content(current_index, force_random=False):
@@ -94,7 +94,6 @@ def get_random_post_content(current_index, force_random=False):
         post = ("﷽\n\n" f"{verse['text']}\n\n" f"| {surah['name']} - الآية {verse['id']} |\n") 
     
     elif content_type in ['bukhari', 'muslim', 'nasai']:
-        # يجب أن يكون هذا المنطق مرناً لاستخراج البيانات من جميع ملفات الحديث
         try:
             book_title_ar = data['metadata']['arabic']['title']
             hadith_list = []
@@ -107,9 +106,10 @@ def get_random_post_content(current_index, force_random=False):
                 narrator_arabic = hadith.get('arabic', {}).get('narrator', "الراوي غير متوفر")
                 post = ("﷽\n\n" f"« {text} »\n\n" f"---" f"الراوي: {narrator_arabic}\n" f"المصدر والمكان: {book_title_ar}")
             else:
-                post = f"لم نتمكن من العثور على أحاديث لغة عربية في المصدر: {book_title_ar}."
-        except Exception:
-             # في حال كان هيكل الملف مختلفًا (لم تتم معالجته بشكل كامل في الـ snippets)
+                post = f"﷽\n\n لا يوجد أحاديث متاحة في مصدر {content_type}."
+        except Exception as e:
+             # في حال كان هيكل الملف مختلفًا أو خاطئًا
+             print(f"Hadith parsing error for {content_type}: {e}")
              post = f"﷽\n\n فشل استخلاص الحديث من مصدر {content_type}. (الرجاء التأكد من هيكل الملف)"
 
             
@@ -120,6 +120,9 @@ def get_random_post_content(current_index, force_random=False):
             reference = zekr_row[4]
             category = zekr_row[0]
             post = ("﷽\n\n" f"{zekr}\n\n" f"---" f"النوع: {category}\n" f"المصدر: {reference}")
+        else:
+             post = f"﷽\n\n لا يوجد أذكار متاحة في مصدر {content_type}."
+
 
     post += f"\n\n#ناشر_الخير #بويكتا"
     
@@ -136,7 +139,6 @@ def post_to_facebook_page(message):
     if response.status_code == 200:
         return True
     else:
-        # طباعة فشل النشر بالتفصيل
         print(f"Facebook Post Failed. Status: {response.status_code}, Response: {response.text}")
         return False
 
@@ -166,7 +168,6 @@ def verify_webhook():
 def handle_webhook():
     """معالجة جميع أحداث الماسنجر."""
     data = request.json
-    # التحقق من نوع الحدث لمنع التعطل غير الضروري
     if data.get("object") != "page":
         return "OK", 200
 
@@ -174,9 +175,11 @@ def handle_webhook():
         for messaging_event in entry.get("messaging", []):
             sender_id = messaging_event["sender"]["id"]
             
+            # 1. معالجة ضغط الأزرار (Postback)
             if messaging_event.get("postback"):
                 handle_postback(sender_id, messaging_event["postback"].get("payload"))
             
+            # 2. معالجة الرسالة النصية
             elif messaging_event.get("message") and not messaging_event["message"].get("is_echo"):
                 handle_message(sender_id, messaging_event["message"])
                 
@@ -197,8 +200,7 @@ def handle_postback(sender_id, payload):
         user_data = get_subscriber_status(sender_id)
         current_status = user_data["status"]
         new_status = toggle_subscription_status(sender_id, current_status)
-        # رسالة رد واضحة
-        message = f"✅ تم {'تفعيل' if new_status == 'active' else 'إلغاء'} خدمة الإشعارات التلقائية بنجاح! \n\nتذكير: يتم حفظ بياناتك مؤقتاً في ذاكرة البوت، وقد تفقد في حال إعادة التشغيل."
+        message = f"✅ تم {'تفعيل' if new_status == 'active' else 'إلغاء'} خدمة الإشعارات التلقائية بنجاح! \n\nتنبيه: سيتم فقدان هذا التفعيل عند إعادة تشغيل البوت."
     
     elif payload == "GET_INFO":
         message = ("🤖 معلومات عن البوت والمطور\n"
@@ -244,11 +246,9 @@ def publish_scheduled_content():
             
             return jsonify({"status": "Success", "message": f"Published {content_type}.", "next_index": next_index}), 200
         else:
-            # خطأ 500 يظهر في Cron-Job.org كـ Failed
             return jsonify({"status": "Failure", "message": "Failed to post to Facebook API. Check Token/Permissions."}), 500
 
     except Exception as e:
-        # خطأ 500 يظهر في Cron-Job.org كـ Failed
         print(f"CRON JOB PUBLISH ERROR: {e}")
         return jsonify({"status": "Error", "message": f"Server error during publish: {str(e)}"}), 500
         
@@ -269,7 +269,6 @@ def send_scheduled_subscriptions():
 
         azkar_data = load_data('azkar')
         
-        # ... (منطق استخلاص الذكر) ...
         if azkar_data and azkar_data.get('rows'):
             filtered_rows = [row for row in azkar_data['rows'] if row[0] == category_search]
             if filtered_rows:
