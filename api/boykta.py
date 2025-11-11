@@ -12,7 +12,7 @@ app = Flask(__name__)
 VERIFY_TOKEN = 'boykta2023'
 PAGE_ACCESS_TOKEN = 'EAAOY2RA6HZCMBP7gRUZCgBkZBEE5YTKxj7BtXeY8PdAfDgatki7qbMZCvuXbdoXLZCwKkKFWdU9TuFe3D1OmT8nfeVvl8PuOvLxzcdLZBD3ZBGjhU0VvmyZApyHsrBwfhMLrrOZCzkw15T5viRGsOP1lgp6kZB7KFEmzptEjHIAShu8nGWIawjICnXfVVtlt03hcf4748ZCogZDZD'
 
-# --- إعدادات قاعدة بيانات MySQL الدائمة (من التفاصيل التي قدمتها) ---
+# --- إعدادات قاعدة بيانات MySQL الدائمة ---
 DB_HOST = '91.99.159.222'
 DB_PORT = 3306
 DB_USER = 'u14327_RhcKAWdYUk'
@@ -25,9 +25,9 @@ FILES = {
     'bukhari': 'bukhari.json',
     'muslim': 'muslim.json',
     'azkar': 'azkar.json',
-    'azkar_sleep': 'azkar_sleep.json', # ملف أذكار جديد
-    'azkar_wudu': 'azkar_wudu.json',   # ملف أذكار جديد
-    'azkar_travel': 'azkar_travel.json', # ملف أذكار جديد
+    'azkar_sleep': 'azkar_sleep.json', 
+    'azkar_wudu': 'azkar_wudu.json',   
+    'azkar_travel': 'azkar_travel.json', 
     'nasai': 'nasai.json',
 }
 
@@ -35,27 +35,25 @@ FILES = {
 # --- دوال الاتصال بقاعدة بيانات MySQL وإنشاء الجداول تلقائياً ---
 
 def get_db_connection():
-    """إنشاء اتصال بقاعدة بيانات MySQL."""
+    """إنشاء اتصال بقاعدة بيانات MySQL وضمان إنشاء الجداول."""
+    conn = None
     try:
         conn = mysql.connector.connect(
             host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASS,
             database=DB_NAME, connection_timeout=5
         )
+        create_tables_if_not_exists(conn) 
         return conn
     except mysql.connector.Error as err:
         print(f"Error connecting to MySQL: {err}")
         return None
 
-def create_tables_if_not_exists():
+def create_tables_if_not_exists(conn):
     """ينشئ جدولي subscribers و settings إذا لم يكونا موجودين."""
-    conn = get_db_connection()
-    if not conn:
-        print("Could not create tables: DB connection failed.")
-        return
+    if not conn: return
     
     cursor = conn.cursor()
     try:
-        # 1. جدول المشتركين (لتخزين user_id والحالة)
         subscribers_table_sql = """
         CREATE TABLE IF NOT EXISTS subscribers (
             user_id VARCHAR(50) PRIMARY KEY,
@@ -65,7 +63,6 @@ def create_tables_if_not_exists():
         """
         cursor.execute(subscribers_table_sql)
         
-        # 2. جدول الإعدادات (لتخزين مؤشر النشر الدوري)
         settings_table_sql = """
         CREATE TABLE IF NOT EXISTS settings (
             `key` VARCHAR(50) PRIMARY KEY,
@@ -75,21 +72,16 @@ def create_tables_if_not_exists():
         cursor.execute(settings_table_sql)
         
         conn.commit()
-        print("MySQL Tables checked/created successfully.")
     except mysql.connector.Error as err:
         print(f"Error creating tables: {err}")
     finally:
         cursor.close()
-        conn.close()
 
-# عند بدء تشغيل التطبيق (أول استدعاء في Vercel) يتم إنشاء الجداول
-create_tables_if_not_exists() 
-
+# -----------------------------------------------------------------
 # --- دوال إدارة المشتركين والحالة (MySQL CRUD) ---
-# (تم إبقاء هذه الدوال كما هي من الرد السابق، وتستخدم الآن الجداول التي تم التأكد من إنشائها)
+# (تمت المحافظة على هذه الدوال كما هي)
 
 def get_subscriber_status(user_id):
-    """جلب حالة المشترك من جدول subscribers."""
     conn = get_db_connection()
     if not conn: return {"status": "inactive"}
     
@@ -99,7 +91,6 @@ def get_subscriber_status(user_id):
         user_data = cursor.fetchone()
         return user_data if user_data else {"status": "inactive", "location": "N/A"}
     except mysql.connector.Error as err:
-        print(f"MySQL Error in get_subscriber_status: {err}")
         return {"status": "inactive"}
     finally:
         if cursor: cursor.close()
@@ -107,7 +98,6 @@ def get_subscriber_status(user_id):
 
 
 def toggle_subscription_status(user_id, current_status):
-    """تبديل حالة المشترك وتحديثها في جدول subscribers."""
     conn = get_db_connection()
     if not conn: return current_status
 
@@ -124,7 +114,6 @@ def toggle_subscription_status(user_id, current_status):
         conn.commit()
         return new_status
     except mysql.connector.Error as err:
-        print(f"MySQL Error in toggle_subscription_status: {err}")
         conn.rollback()
         return current_status
     finally:
@@ -132,7 +121,6 @@ def toggle_subscription_status(user_id, current_status):
         if conn: conn.close()
 
 def get_active_subscribers():
-    """جلب جميع الـ user_id للمشتركين النشطين."""
     conn = get_db_connection()
     if not conn: return []
     
@@ -141,14 +129,12 @@ def get_active_subscribers():
         cursor.execute("SELECT user_id FROM subscribers WHERE status = 'active'")
         return [row[0] for row in cursor.fetchall()]
     except mysql.connector.Error as err:
-        print(f"MySQL Error in get_active_subscribers: {err}")
         return []
     finally:
         if cursor: cursor.close()
         if conn: conn.close()
 
 def get_publish_index():
-    """جلب مؤشر النشر الحالي من جدول settings."""
     conn = get_db_connection()
     if not conn: return 0
     
@@ -158,14 +144,12 @@ def get_publish_index():
         setting = cursor.fetchone()
         return setting['value'] if setting else 0
     except mysql.connector.Error as err:
-        print(f"MySQL Error in get_publish_index: {err}")
         return 0
     finally:
         if cursor: cursor.close()
         if conn: conn.close()
 
 def update_publish_index(new_index):
-    """تحديث مؤشر النشر التالي في جدول settings."""
     conn = get_db_connection()
     if not conn: return 0
     
@@ -180,7 +164,6 @@ def update_publish_index(new_index):
         conn.commit()
         return new_index
     except mysql.connector.Error as err:
-        print(f"MySQL Error in update_publish_index: {err}")
         conn.rollback()
         return 0
     finally:
@@ -216,7 +199,6 @@ def get_random_post_content(current_index, force_random=False):
     post = ""
     next_index = current_index + 1
     
-    # [منطق استخلاص المنشور من ملفات JSON]
     if content_type == 'quran':
         surah = random.choice(data)
         verse = random.choice(surah['verses'])
@@ -236,7 +218,6 @@ def get_random_post_content(current_index, force_random=False):
         else:
             post = f"لم نتمكن من العثور على أحاديث لغة عربية في المصدر: {book_title_ar}."
             
-    # معالجة جميع ملفات الأذكار المضافة
     elif content_type in ['azkar', 'azkar_sleep', 'azkar_wudu', 'azkar_travel']:
         if data and data.get('rows'):
             zekr_row = random.choice(data['rows'])
@@ -273,7 +254,7 @@ def send_messenger_message(recipient_id, message_text, quick_replies=None):
     requests.post("https://graph.facebook.com/v18.0/me/messages", params=params, headers=headers, data=json.dumps(data))
 
 # -----------------------------------------------------------------
-# --- نقاط نهاية الـ Webhook الرئيسية ---
+# --- نقاط نهاية الـ Webhook الرئيسية (تم حل مشكلة الـ Postback) ---
 
 @app.route('/webhook', methods=['GET'])
 def verify_webhook():
@@ -301,7 +282,7 @@ def handle_webhook():
     return "OK", 200
 
 def handle_postback(sender_id, payload):
-    """معالجة منطق ضغط الأزرار."""
+    """معالجة منطق ضغط الأزرار (Postback)."""
     
     quick_replies = [
         {"content_type": "text", "title": "📖 محتوى عشوائي", "payload": "GET_RANDOM_CONTENT"},
@@ -323,7 +304,6 @@ def handle_postback(sender_id, payload):
                    "المطور: يونس لعلجي (Younes Laldji)")
                    
     elif payload == "GET_RANDOM_CONTENT":
-        # المنطق يحصل على محتوى عشوائي ولا يؤثر على مؤشر النشر الدوري
         post_content, _, _ = get_random_post_content(0, force_random=True)
         message = f"هذا محتواك العشوائي اليوم:\n\n{post_content}"
     
@@ -345,8 +325,8 @@ def handle_message(sender_id, message):
 
 
 # --- نقطة نهاية Cron Job للنشر الآلي على الصفحة ---
-
-@app.route('/api/publish', methods=['GET', 'POST'])
+# يجب أن تستدعي خدمة Cron Job الآن https://boykta-b.vercel.app/publish
+@app.route('/publish', methods=['GET', 'POST'])
 def publish_scheduled_content():
     
     try:
@@ -356,10 +336,8 @@ def publish_scheduled_content():
         success = post_to_facebook_page(post_content)
         
         if success:
-            # يتم تحديث المؤشر في MySQL فقط عند نجاح النشر
             update_publish_index(next_index) 
             
-            # منطق النشر التجريبي الأول
             if current_index == 0:
                  return jsonify({"status": "Success", "message": "First scheduled post published for testing.", "next_index": next_index}), 200
             
@@ -371,12 +349,11 @@ def publish_scheduled_content():
         return jsonify({"status": "Error", "message": str(e)}), 500
         
 # --- نقطة نهاية Cron Job لاشتراكات الماسنجر ---
-
-@app.route('/api/send_subscriptions', methods=['GET', 'POST'])
+# يجب أن تستدعي خدمة Cron Job الآن https://boykta-b.vercel.app/send_subscriptions
+@app.route('/send_subscriptions', methods=['GET', 'POST'])
 def send_scheduled_subscriptions():
     
     current_hour = datetime.now().hour
-    # تحديد توقيتات الصباح والمساء
     if 5 <= current_hour < 12:
         category_search = "أذكار الصباح"
         message_type = "تذكير بالصباح"
@@ -389,7 +366,6 @@ def send_scheduled_subscriptions():
     azkar_data = load_data('azkar')
     
     if azkar_data and azkar_data.get('rows'):
-        # يفضل في المستقبل أن يكون لكل نوع أذكار ملفه الخاص لضمان الدقة
         filtered_rows = [row for row in azkar_data['rows'] if row[0] == category_search]
         if filtered_rows:
             zekr_text = random.choice(filtered_rows)[1]
