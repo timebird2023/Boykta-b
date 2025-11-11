@@ -4,7 +4,6 @@ import json
 import os
 import random
 from datetime import datetime
-import mysql.connector 
 
 app = Flask(__name__)
 
@@ -12,12 +11,10 @@ app = Flask(__name__)
 VERIFY_TOKEN = 'boykta2023'
 PAGE_ACCESS_TOKEN = 'EAAOY2RA6HZCMBP7gRUZCgBkZBEE5YTKxj7BtXeY8PdAfDgatki7qbMZCvuXbdoXLZCwKkKFWdU9TuFe3D1OmT8nfeVvl8PuOvLxzcdLZBD3ZBGjhU0VvmyZApyHsrBwfhMLrrOZCzkw15T5viRGsOP1lgp6kZB7KFEmzptEjHIAShu8nGWIawjICnXfVVtlt03hcf4748ZCogZDZD'
 
-# --- إعدادات قاعدة بيانات MySQL الدائمة ---
-DB_HOST = '91.99.159.222'
-DB_PORT = 3306
-DB_USER = 'u14327_RhcKAWdYUk'
-DB_PASS = 'jyyqqlvgovMHH@lugFU91Zp9' 
-DB_NAME = 'u14327_RhcKAWdYUk' 
+# --- قاعدة بيانات مؤقتة في الذاكرة (لحل مشكلة عدم الاستجابة) ---
+# تنبيه: يتم مسح هذه البيانات عند إعادة تشغيل Vercel Function
+TEMP_SUBSCRIPTIONS = {} 
+TEMP_PUBLISH_INDEX = 0
 
 # --- مسارات ملفات المحتوى المُحدثة ---
 FILES = {
@@ -32,143 +29,32 @@ FILES = {
 }
 
 # -----------------------------------------------------------------
-# --- دوال الاتصال بقاعدة بيانات MySQL وإنشاء الجداول تلقائياً ---
-
-def get_db_connection():
-    """إنشاء اتصال بقاعدة بيانات MySQL وضمان إنشاء الجداول."""
-    conn = None
-    try:
-        conn = mysql.connector.connect(
-            host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASS,
-            database=DB_NAME, connection_timeout=5
-        )
-        create_tables_if_not_exists(conn) 
-        return conn
-    except mysql.connector.Error as err:
-        print(f"Error connecting to MySQL: {err}")
-        return None
-
-def create_tables_if_not_exists(conn):
-    """ينشئ جدولي subscribers و settings إذا لم يكونا موجودين."""
-    if not conn: return
-    
-    cursor = conn.cursor()
-    try:
-        subscribers_table_sql = """
-        CREATE TABLE IF NOT EXISTS subscribers (
-            user_id VARCHAR(50) PRIMARY KEY,
-            status VARCHAR(10) NOT NULL,
-            location VARCHAR(50)
-        )
-        """
-        cursor.execute(subscribers_table_sql)
-        
-        settings_table_sql = """
-        CREATE TABLE IF NOT EXISTS settings (
-            `key` VARCHAR(50) PRIMARY KEY,
-            `value` INT
-        )
-        """
-        cursor.execute(settings_table_sql)
-        
-        conn.commit()
-    except mysql.connector.Error as err:
-        print(f"Error creating tables: {err}")
-    finally:
-        cursor.close()
-
-# -----------------------------------------------------------------
-# --- دوال إدارة المشتركين والحالة (MySQL CRUD) ---
-# (تمت المحافظة على هذه الدوال كما هي)
+# --- دوال إدارة المشتركين والحالة (الاعتماد على الذاكرة المؤقتة) ---
 
 def get_subscriber_status(user_id):
-    conn = get_db_connection()
-    if not conn: return {"status": "inactive"}
-    
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("SELECT status, location FROM subscribers WHERE user_id = %s", (user_id,))
-        user_data = cursor.fetchone()
-        return user_data if user_data else {"status": "inactive", "location": "N/A"}
-    except mysql.connector.Error as err:
-        return {"status": "inactive"}
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
-
+    """جلب حالة المشترك من الذاكرة المؤقتة."""
+    return TEMP_SUBSCRIPTIONS.get(user_id, {"status": "inactive", "location": "N/A"})
 
 def toggle_subscription_status(user_id, current_status):
-    conn = get_db_connection()
-    if not conn: return current_status
-
+    """تبديل حالة المشترك في الذاكرة المؤقتة."""
     new_status = "inactive" if current_status == "active" else "active"
-    cursor = conn.cursor()
-
-    try:
-        sql = """
-        INSERT INTO subscribers (user_id, status, location) 
-        VALUES (%s, %s, %s)
-        ON DUPLICATE KEY UPDATE status = %s, location = %s
-        """
-        cursor.execute(sql, (user_id, new_status, "Riyadh", new_status, "Riyadh"))
-        conn.commit()
-        return new_status
-    except mysql.connector.Error as err:
-        conn.rollback()
-        return current_status
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
+    TEMP_SUBSCRIPTIONS[user_id] = {"status": new_status, "location": "Riyadh"} 
+    return new_status
 
 def get_active_subscribers():
-    conn = get_db_connection()
-    if not conn: return []
-    
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT user_id FROM subscribers WHERE status = 'active'")
-        return [row[0] for row in cursor.fetchall()]
-    except mysql.connector.Error as err:
-        return []
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
+    """جلب جميع الـ user_id للمشتركين النشطين من الذاكرة المؤقتة."""
+    return [uid for uid, data in TEMP_SUBSCRIPTIONS.items() if data['status'] == 'active']
 
 def get_publish_index():
-    conn = get_db_connection()
-    if not conn: return 0
-    
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("SELECT value FROM settings WHERE `key` = 'publish_index'")
-        setting = cursor.fetchone()
-        return setting['value'] if setting else 0
-    except mysql.connector.Error as err:
-        return 0
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
+    """جلب مؤشر النشر الحالي من الذاكرة المؤقتة."""
+    global TEMP_PUBLISH_INDEX
+    return TEMP_PUBLISH_INDEX
 
 def update_publish_index(new_index):
-    conn = get_db_connection()
-    if not conn: return 0
-    
-    cursor = conn.cursor()
-    try:
-        sql = """
-        INSERT INTO settings (`key`, `value`) 
-        VALUES ('publish_index', %s)
-        ON DUPLICATE KEY UPDATE `value` = %s
-        """
-        cursor.execute(sql, (new_index, new_index))
-        conn.commit()
-        return new_index
-    except mysql.connector.Error as err:
-        conn.rollback()
-        return 0
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
+    """تحديث مؤشر النشر التالي في الذاكرة المؤقتة."""
+    global TEMP_PUBLISH_INDEX
+    TEMP_PUBLISH_INDEX = new_index
+    return TEMP_PUBLISH_INDEX
 
 # -----------------------------------------------------------------
 # --- وظائف المحتوى والمنشورات ---
@@ -181,6 +67,8 @@ def load_data(file_key):
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
+        # طباعة الخطأ في سجلات Vercel إذا لم يتم العثور على ملف
+        print(f"Error loading data file: {file_path}. Error: {e}")
         return None
 
 def get_random_post_content(current_index, force_random=False):
@@ -199,24 +87,31 @@ def get_random_post_content(current_index, force_random=False):
     post = ""
     next_index = current_index + 1
     
+    # [منطق استخلاص المنشور من ملفات JSON]
     if content_type == 'quran':
         surah = random.choice(data)
         verse = random.choice(surah['verses'])
         post = ("﷽\n\n" f"{verse['text']}\n\n" f"| {surah['name']} - الآية {verse['id']} |\n") 
     
     elif content_type in ['bukhari', 'muslim', 'nasai']:
-        book_title_ar = data['metadata']['arabic']['title']
-        hadith_list = []
-        for chapter in data.get('chapters', []):
-            if 'hadiths' in chapter:
-                hadith_list.extend(chapter['hadiths'])
-        if hadith_list:
-            hadith = random.choice(hadith_list)
-            text = hadith.get('arabic', {}).get('text', "نص الحديث غير متوفر")
-            narrator_arabic = hadith.get('arabic', {}).get('narrator', "الراوي غير متوفر")
-            post = ("﷽\n\n" f"« {text} »\n\n" f"---" f"الراوي: {narrator_arabic}\n" f"المصدر والمكان: {book_title_ar}")
-        else:
-            post = f"لم نتمكن من العثور على أحاديث لغة عربية في المصدر: {book_title_ar}."
+        # يجب أن يكون هذا المنطق مرناً لاستخراج البيانات من جميع ملفات الحديث
+        try:
+            book_title_ar = data['metadata']['arabic']['title']
+            hadith_list = []
+            for chapter in data.get('chapters', []):
+                if 'hadiths' in chapter:
+                    hadith_list.extend(chapter['hadiths'])
+            if hadith_list:
+                hadith = random.choice(hadith_list)
+                text = hadith.get('arabic', {}).get('text', "نص الحديث غير متوفر")
+                narrator_arabic = hadith.get('arabic', {}).get('narrator', "الراوي غير متوفر")
+                post = ("﷽\n\n" f"« {text} »\n\n" f"---" f"الراوي: {narrator_arabic}\n" f"المصدر والمكان: {book_title_ar}")
+            else:
+                post = f"لم نتمكن من العثور على أحاديث لغة عربية في المصدر: {book_title_ar}."
+        except Exception:
+             # في حال كان هيكل الملف مختلفًا (لم تتم معالجته بشكل كامل في الـ snippets)
+             post = f"﷽\n\n فشل استخلاص الحديث من مصدر {content_type}. (الرجاء التأكد من هيكل الملف)"
+
             
     elif content_type in ['azkar', 'azkar_sleep', 'azkar_wudu', 'azkar_travel']:
         if data and data.get('rows'):
@@ -241,7 +136,8 @@ def post_to_facebook_page(message):
     if response.status_code == 200:
         return True
     else:
-        print("Post failed:", response.text)
+        # طباعة فشل النشر بالتفصيل
+        print(f"Facebook Post Failed. Status: {response.status_code}, Response: {response.text}")
         return False
 
 def send_messenger_message(recipient_id, message_text, quick_replies=None):
@@ -254,10 +150,11 @@ def send_messenger_message(recipient_id, message_text, quick_replies=None):
     requests.post("https://graph.facebook.com/v18.0/me/messages", params=params, headers=headers, data=json.dumps(data))
 
 # -----------------------------------------------------------------
-# --- نقاط نهاية الـ Webhook الرئيسية (تم حل مشكلة الـ Postback) ---
+# --- نقاط نهاية الـ Webhook الرئيسية ---
 
 @app.route('/webhook', methods=['GET'])
 def verify_webhook():
+    """التحقق من الـ Webhook (عند الإعداد)."""
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
@@ -269,6 +166,10 @@ def verify_webhook():
 def handle_webhook():
     """معالجة جميع أحداث الماسنجر."""
     data = request.json
+    # التحقق من نوع الحدث لمنع التعطل غير الضروري
+    if data.get("object") != "page":
+        return "OK", 200
+
     for entry in data.get("entry", []):
         for messaging_event in entry.get("messaging", []):
             sender_id = messaging_event["sender"]["id"]
@@ -296,7 +197,8 @@ def handle_postback(sender_id, payload):
         user_data = get_subscriber_status(sender_id)
         current_status = user_data["status"]
         new_status = toggle_subscription_status(sender_id, current_status)
-        message = f"✅ تم {'تفعيل' if new_status == 'active' else 'إلغاء'} خدمة الإشعارات التلقائية بنجاح! شكراً لك."
+        # رسالة رد واضحة
+        message = f"✅ تم {'تفعيل' if new_status == 'active' else 'إلغاء'} خدمة الإشعارات التلقائية بنجاح! \n\nتذكير: يتم حفظ بياناتك مؤقتاً في ذاكرة البوت، وقد تفقد في حال إعادة التشغيل."
     
     elif payload == "GET_INFO":
         message = ("🤖 معلومات عن البوت والمطور\n"
@@ -325,7 +227,6 @@ def handle_message(sender_id, message):
 
 
 # --- نقطة نهاية Cron Job للنشر الآلي على الصفحة ---
-# يجب أن تستدعي خدمة Cron Job الآن https://boykta-b.vercel.app/publish
 @app.route('/publish', methods=['GET', 'POST'])
 def publish_scheduled_content():
     
@@ -343,43 +244,51 @@ def publish_scheduled_content():
             
             return jsonify({"status": "Success", "message": f"Published {content_type}.", "next_index": next_index}), 200
         else:
-            return jsonify({"status": "Failure", "message": "Failed to post to Facebook API."}), 500
+            # خطأ 500 يظهر في Cron-Job.org كـ Failed
+            return jsonify({"status": "Failure", "message": "Failed to post to Facebook API. Check Token/Permissions."}), 500
 
     except Exception as e:
-        return jsonify({"status": "Error", "message": str(e)}), 500
+        # خطأ 500 يظهر في Cron-Job.org كـ Failed
+        print(f"CRON JOB PUBLISH ERROR: {e}")
+        return jsonify({"status": "Error", "message": f"Server error during publish: {str(e)}"}), 500
         
 # --- نقطة نهاية Cron Job لاشتراكات الماسنجر ---
-# يجب أن تستدعي خدمة Cron Job الآن https://boykta-b.vercel.app/send_subscriptions
 @app.route('/send_subscriptions', methods=['GET', 'POST'])
 def send_scheduled_subscriptions():
     
-    current_hour = datetime.now().hour
-    if 5 <= current_hour < 12:
-        category_search = "أذكار الصباح"
-        message_type = "تذكير بالصباح"
-    elif 16 <= current_hour < 20:
-        category_search = "أذكار المساء"
-        message_type = "تذكير بالمساء"
-    else:
-        return jsonify({"status": "Skipped", "message": "No specific content for this time."}), 200
-
-    azkar_data = load_data('azkar')
-    
-    if azkar_data and azkar_data.get('rows'):
-        filtered_rows = [row for row in azkar_data['rows'] if row[0] == category_search]
-        if filtered_rows:
-            zekr_text = random.choice(filtered_rows)[1]
-            subscription_message = f"حان الآن وقت {message_type} 🌅\n\n{zekr_text}\n\n#ناشر_الخير"
+    try:
+        current_hour = datetime.now().hour
+        if 5 <= current_hour < 12:
+            category_search = "أذكار الصباح"
+            message_type = "تذكير بالصباح"
+        elif 16 <= current_hour < 20:
+            category_search = "أذكار المساء"
+            message_type = "تذكير بالمساء"
         else:
-            subscription_message = f"تذكير: لم نجد أذكار لفئة {category_search} حالياً."
-    else:
-        subscription_message = "تذكير: قاعدة بيانات الأذكار غير متاحة حالياً."
-    
-    active_subscribers = get_active_subscribers()
-    sent_count = 0
-    
-    for user_id in active_subscribers:
-        send_messenger_message(user_id, subscription_message)
-        sent_count += 1
-            
-    return jsonify({"status": "Success", "message": f"Sent {message_type} to {sent_count} subscribers."}), 200
+            return jsonify({"status": "Skipped", "message": "No specific content for this time."}), 200
+
+        azkar_data = load_data('azkar')
+        
+        # ... (منطق استخلاص الذكر) ...
+        if azkar_data and azkar_data.get('rows'):
+            filtered_rows = [row for row in azkar_data['rows'] if row[0] == category_search]
+            if filtered_rows:
+                zekr_text = random.choice(filtered_rows)[1]
+                subscription_message = f"حان الآن وقت {message_type} 🌅\n\n{zekr_text}\n\n#ناشر_الخير"
+            else:
+                subscription_message = f"تذكير: لم نجد أذكار لفئة {category_search} حالياً."
+        else:
+            subscription_message = "تذكير: قاعدة بيانات الأذكار غير متاحة حالياً."
+        
+        active_subscribers = get_active_subscribers()
+        sent_count = 0
+        
+        for user_id in active_subscribers:
+            send_messenger_message(user_id, subscription_message)
+            sent_count += 1
+                
+        return jsonify({"status": "Success", "message": f"Sent {message_type} to {sent_count} subscribers."}), 200
+        
+    except Exception as e:
+        print(f"CRON JOB SUBSCRIPTIONS ERROR: {e}")
+        return jsonify({"status": "Error", "message": f"Server error during subscription send: {str(e)}"}), 500
