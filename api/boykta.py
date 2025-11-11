@@ -30,44 +30,38 @@ FILES = {
 
 # -----------------------------------------------------------------
 # --- دوال إدارة المشتركين والحالة (الاعتماد على الذاكرة المؤقتة) ---
+# (بما أننا لا نستخدم MySQL، فهذه الدوال لا تتغير)
+# ... [get_subscriber_status, toggle_subscription_status, get_active_subscribers, get_publish_index, update_publish_index] ...
 
 def get_subscriber_status(user_id):
-    """جلب حالة المشترك من الذاكرة المؤقتة."""
     return TEMP_SUBSCRIPTIONS.get(user_id, {"status": "inactive", "location": "N/A"})
 
 def toggle_subscription_status(user_id, current_status):
-    """تبديل حالة المشترك في الذاكرة المؤقتة."""
     new_status = "inactive" if current_status == "active" else "active"
     TEMP_SUBSCRIPTIONS[user_id] = {"status": new_status, "location": "Riyadh"} 
     return new_status
 
 def get_active_subscribers():
-    """جلب جميع الـ user_id للمشتركين النشطين من الذاكرة المؤقتة."""
     return [uid for uid, data in TEMP_SUBSCRIPTIONS.items() if data['status'] == 'active']
 
 def get_publish_index():
-    """جلب مؤشر النشر الحالي من الذاكرة المؤقتة."""
     global TEMP_PUBLISH_INDEX
     return TEMP_PUBLISH_INDEX
 
 def update_publish_index(new_index):
-    """تحديث مؤشر النشر التالي في الذاكرة المؤقتة."""
     global TEMP_PUBLISH_INDEX
     TEMP_PUBLISH_INDEX = new_index
     return TEMP_PUBLISH_INDEX
-
 # -----------------------------------------------------------------
-# --- وظائف المحتوى والمنشورات ---
 
 def load_data(file_key):
-    """تحميل بيانات ملف JSON المرفق بمرونة عالية لمنع التعطل."""
+    """تحميل بيانات ملف JSON بمرونة عالية."""
     file_path = FILES.get(file_key)
     if not file_path: return None
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        # إذا فشل التحميل، نُسجل الخطأ ونُرجع None ونمنع تعطل البوت
         print(f"CRITICAL ERROR: Failed to load data file {file_path}. Error: {e}")
         return None
 
@@ -107,12 +101,9 @@ def get_random_post_content(current_index, force_random=False):
                 post = ("﷽\n\n" f"« {text} »\n\n" f"---" f"الراوي: {narrator_arabic}\n" f"المصدر والمكان: {book_title_ar}")
             else:
                 post = f"﷽\n\n لا يوجد أحاديث متاحة في مصدر {content_type}."
-        except Exception as e:
-             # في حال كان هيكل الملف مختلفًا أو خاطئًا
-             print(f"Hadith parsing error for {content_type}: {e}")
+        except Exception:
              post = f"﷽\n\n فشل استخلاص الحديث من مصدر {content_type}. (الرجاء التأكد من هيكل الملف)"
 
-            
     elif content_type in ['azkar', 'azkar_sleep', 'azkar_wudu', 'azkar_travel']:
         if data and data.get('rows'):
             zekr_row = random.choice(data['rows'])
@@ -168,6 +159,7 @@ def verify_webhook():
 def handle_webhook():
     """معالجة جميع أحداث الماسنجر."""
     data = request.json
+    # التحقق للتأكد من أننا نعالج رسائل الصفحة فقط
     if data.get("object") != "page":
         return "OK", 200
 
@@ -175,11 +167,11 @@ def handle_webhook():
         for messaging_event in entry.get("messaging", []):
             sender_id = messaging_event["sender"]["id"]
             
-            # 1. معالجة ضغط الأزرار (Postback)
+            # 1. معالجة ضغط الأزرار (Postback) - الأولوية الأولى
             if messaging_event.get("postback"):
                 handle_postback(sender_id, messaging_event["postback"].get("payload"))
             
-            # 2. معالجة الرسالة النصية
+            # 2. معالجة الرسالة النصية العادية
             elif messaging_event.get("message") and not messaging_event["message"].get("is_echo"):
                 handle_message(sender_id, messaging_event["message"])
                 
@@ -216,8 +208,10 @@ def handle_postback(sender_id, payload):
         
     send_messenger_message(sender_id, message, quick_replies=quick_replies)
 
+@app.route('/handle_message', methods=['POST']) # هذا المسار غير مستخدم، لكن تركته منفصلاً
 def handle_message(sender_id, message):
     """إعادة إظهار الأزرار عند إرسال رسالة نصية."""
+    # القائمة التي ستظهر للمستخدم
     quick_replies = [
         {"content_type": "text", "title": "📖 محتوى عشوائي", "payload": "GET_RANDOM_CONTENT"},
         {"content_type": "text", "title": "🔔 تفعيل/إلغاء الإشعارات", "payload": "TOGGLE_NOTIFICATIONS"},
@@ -225,6 +219,8 @@ def handle_message(sender_id, message):
     ]
     welcome_message = ("مرحباً بك في بوت ناشر الخير 🕌\n"
                        "يرجى استخدام الأزرار أدناه للتحكم في خدمات الإشعارات: ")
+    
+    # هنا الإرسال، وهو السبب الذي كان قد يعيق الاستجابة لو كان خاطئا
     send_messenger_message(sender_id, welcome_message, quick_replies=quick_replies)
 
 
