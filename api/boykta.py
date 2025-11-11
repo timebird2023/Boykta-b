@@ -1,375 +1,337 @@
 from flask import Flask, request, jsonify
-import os
 import requests
-import logging
 import json
-import datetime
+import os
 import random
-import mysql.connector
-from pathlib import Path # استخدام مكتبة pathlib الحديثة للتعامل مع المسارات
+from datetime import datetime
+# تم استبدال pymongo بـ mysql.connector-python
+import mysql.connector 
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
 
-# ==================== الإعدادات والثوابت ====================
-VERIFY_TOKEN = "boykta2030"
-PAGE_ID = "876149952244490"
-PAGE_ACCESS_TOKEN_VALUE = "EAAOY2RA6HZCMBP7gRUZCgBkZBEE5YTKxj7BtXeY8PdAfDgatki7qbMZCvuXbdoXLZCwKkKFWdU9TuFe3D1OmT8nfeVvl8PuOvLxzcdLZBD3ZBGjhU0VvmyZApyHsrBwfhMLrrOZCzkw15T5viRGsOP1lgp6kZB7KFEmzptEjHIAShu8nGWIawjICnXfVVqlt03hcf4748ZCogZDZD"
-PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN", PAGE_ACCESS_TOKEN_VALUE)
-FB_MESSAGES_API = "https://graph.facebook.com/v18.0/me/messages"
-FB_POSTING_API = f"https://graph.facebook.com/v18.0/{PAGE_ID}/feed" 
+# --- الإعدادات الثابتة والمُقدمة ---
+VERIFY_TOKEN = 'boykta2023'
+PAGE_ACCESS_TOKEN = 'EAAOY2RA6HZCMBP7gRUZCgBkZBEE5YTKxj7BtXeY8PdAfDgatki7qbMZCvuXbdoXLZCwKkKFWdU9TuFe3D1OmT8nfeVvl8PuOvLxzcdLZBD3ZBGjhU0VvmyZApyHsrBwfhMLrrOZCzkw15T5viRGsOP1lgp6kZB7KFEmzptEjHIAShu8nGWIawjICnXfVVqlt03hcf4748ZCogZDZD'
 
-# 🌟 التوكن السري للجدولة الخارجية 🌟
-CRON_SECRET_TOKEN = os.environ.get("CRON_SECRET_TOKEN", "EXTERNAL_CRON_TRIGGER_2025")
-
-# ==================== إعدادات MySQL ====================
-DB_CONFIG = {
-    'host': '91.99.159.222',
-    'port': 3306,
-    'user': 'u14327_RhcKAWDyUk',
-    'password': 'jyqqilvgovMHH@lugFU91zp9',
-    'database': 's14327_boykta', 
-    'connect_timeout': 10
-}
-
-# ==================== إعدادات تحميل البيانات ====================
-DATA_DIR = Path(__file__).parent / 'data'
-APP_DATA = {} # القاموس العالمي لتخزين كل محتوى JSON المحمل
-
-def load_all_app_data():
-    """
-    تحميل جميع ملفات JSON من المجلدات الفرعية (azkar, hadith, quran) داخل مجلد data.
-    """
-    global APP_DATA
-    data = {}
-    
-    if not DATA_DIR.is_dir():
-        logging.error(f"Data directory not found: {DATA_DIR}. Cannot load content.")
-        return {}
-
-    for folder_path in DATA_DIR.iterdir():
-        if folder_path.is_dir():
-            folder_name = folder_path.name
-            data[folder_name] = {}
-            logging.info(f"Loading data from folder: {folder_name}")
-            
-            for file_path in folder_path.glob("*.json"):
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        # المفتاح هو اسم الملف بدون اللاحقة (مثل 'bukhari', 'quran', 'azkar')
-                        data_key = file_path.stem
-                        data[folder_name][data_key] = json.load(f)
-                    logging.info(f"  - Loaded file: {file_path.name}")
-                except json.JSONDecodeError:
-                    logging.error(f"  - ERROR: JSON Decode failed in: {file_path.name}")
-                except Exception as e:
-                    logging.error(f"  - ERROR: Failed to read file {file_path.name}: {e}")
-                    
-    APP_DATA = data
-    logging.info(f"✅ Data loading complete. Available categories: {list(APP_DATA.keys())}")
-
-def get_random_content():
-    """اختيار محتوى ديني عشوائي (آية، حديث، أو ذكر) ونص مصدره."""
-    
-    # قائمة الفئات المتوفرة التي نريد النشر منها (مثل hadith, quran)
-    publishable_categories = ['hadith', 'quran']
-    
-    # فلترة الفئات المتاحة والتحقق من أنها غير فارغة
-    valid_categories = [c for c in publishable_categories if c in APP_DATA and APP_DATA[c]]
-    
-    if not valid_categories:
-        return "عفواً، لا توجد بيانات للنشر (hadith أو quran).", "System"
-
-    # اختيار فئة عشوائية (مثلاً: hadith)
-    category = random.choice(valid_categories)
-    
-    # اختيار مصدر عشوائي داخل الفئة (مثلاً: bukhari, muslim, quran)
-    sources = APP_DATA[category]
-    source_key = random.choice(list(sources.keys()))
-    content_list = sources[source_key]
-    
-    chosen_item = None
-    
-    # التعامل مع البيانات، بافتراض أنها قائمة أو قاموس
-    if isinstance(content_list, list) and content_list:
-        chosen_item = random.choice(content_list)
-    elif isinstance(content_list, dict) and content_list:
-        # إذا كان قاموساً، نفترض أن القيم هي العناصر
-        chosen_item = random.choice(list(content_list.values()))
-    
-    if chosen_item:
-        # محاولة استخراج النص (يجب تكييف هذا حسب بنية ملفاتك الفعلية)
-        if isinstance(chosen_item, str):
-            content_text = chosen_item
-        elif isinstance(chosen_item, dict):
-            # محاولة استخراج نص من مفاتيح شائعة (text, content, ayah)
-            content_text = chosen_item.get('text') or chosen_item.get('content') or chosen_item.get('ayah') or str(chosen_item)
-        else:
-            content_text = str(chosen_item)
-        
-        # تنسيق اسم المصدر (مثلاً: Hadith/bukhari)
-        source_name = f"({category}/{source_key})"
-        return content_text, source_name
-    
-    return "عفواً، لم نتمكن من العثور على محتوى مناسب.", f"{category}/{source_key}"
-
-
-def get_random_azkar():
-    """اختيار ذكر عشوائي من ملف azkar.json."""
-    if 'azkar' in APP_DATA and 'azkar' in APP_DATA['azkar']:
-        azkar_list = APP_DATA['azkar']['azkar']
-        
-        chosen_item = None
-        if isinstance(azkar_list, list) and azkar_list:
-            chosen_item = random.choice(azkar_list)
-        elif isinstance(azkar_list, dict) and azkar_list:
-             chosen_item = random.choice(list(azkar_list.values()))
-             
-        if chosen_item:
-            if isinstance(chosen_item, str):
-                return chosen_item
-            elif isinstance(chosen_item, dict):
-                # البحث عن مفتاح نصي للذكر (يجب تكييف هذا)
-                return chosen_item.get('text') or chosen_item.get('content') or str(chosen_item)
-            return str(chosen_item)
-            
-    return "لا يوجد ذكر لارساله حالياً."
-
-# ==================== دوال قاعدة البيانات ====================
+# --- إعدادات قاعدة بيانات MySQL (التفاصيل التي قدمتها) ---
+# يفضل استخدام متغيرات البيئة في Vercel لأسباب أمنية، لكن سنستخدم القيم مباشرة هنا
+DB_HOST = '91.99.159.222'
+DB_PORT = 3306
+DB_USER = 'u14327_RhcKAWdYUk'
+DB_PASS = 'jyyqqlvgovMHH@lugFU91Zp9' # كلمة المرور بدون تشفير الـ @
+DB_NAME = 'u14327_RhcKAWdYUk' # تم استنتاج اسم قاعدة البيانات من بيانات الاتصال
 
 def get_db_connection():
-    """إنشاء اتصال بقاعدة البيانات."""
+    """إنشاء اتصال بقاعدة بيانات MySQL."""
     try:
-        conn = mysql.connector.connect(**DB_CONFIG)
+        conn = mysql.connector.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            user=DB_USER,
+            password=DB_PASS,
+            database=DB_NAME,
+            connection_timeout=5 # مهلة قصيرة لبيئة Lambda
+        )
         return conn
     except mysql.connector.Error as err:
-        logging.error(f"MySQL connection failed: {err}")
+        print(f"Error connecting to MySQL: {err}")
         return None
 
-def initialize_db():
-    """إنشاء جدول المشتركين إذا لم يكن موجوداً (يتم استدعاؤه عند بدء التشغيل)."""
+# --- مسارات ملفات المحتوى ---
+FILES = {
+    'quran': 'quran.json',
+    'bukhari': 'bukhari.json',
+    'muslim': 'muslim.json',
+    'azkar': 'azkar.json',
+    'nasai': 'nasai.json',
+}
+
+
+# --- دوال إدارة المشتركين والحالة (MySQL CRUD) ---
+
+def get_subscriber_status(user_id):
+    """[DB READ] جلب حالة المشترك من جدول subscribers."""
     conn = get_db_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            # أمر SQL لإنشاء الجدول
-            create_table_query = """
-            CREATE TABLE IF NOT EXISTS subscribers (
-                psid VARCHAR(255) PRIMARY KEY,
-                subscribed BOOLEAN NOT NULL,
-                last_activity DATETIME
-            );
-            """
-            cursor.execute(create_table_query)
-            conn.commit()
-            logging.info("Database table 'subscribers' checked/created successfully.")
-        except mysql.connector.Error as err:
-            logging.error(f"Error creating table: {err}")
-        finally:
-            conn.close()
-
-def toggle_subscription(user_id, status):
-    """تفعيل/إلغاء الاشتراك."""
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor()
-        query = "INSERT INTO subscribers (psid, subscribed, last_activity) VALUES (%s, %s, NOW()) ON DUPLICATE KEY UPDATE subscribed = %s, last_activity = NOW()"
-        cursor.execute(query, (user_id, status, status))
-        conn.commit()
-        conn.close()
-        return True
-    return False
-
-def is_subscribed(user_id):
-    """التحقق من حالة الاشتراك."""
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor(dictionary=True)
-        query = "SELECT subscribed FROM subscribers WHERE psid = %s"
-        cursor.execute(query, (user_id,))
-        result = cursor.fetchone()
-        conn.close()
-        return result and result['subscribed'] == 1
-    return False
-
-# ==================== دوال الإرسال والنشر ====================
-
-def send_message(recipient_id, message_data):
-    """إرسال رسالة إلى الماسنجر."""
-    payload = {'recipient': {'id': recipient_id}, 'message': message_data}
-    try:
-        requests.post(FB_MESSAGES_API, params={'access_token': PAGE_ACCESS_TOKEN}, json=payload)
-    except Exception as e:
-        logging.error(f"Failed to send message: {e}")
-
-def post_to_page(message_text):
-    """نشر المحتوى على صفحة فيسبوك."""
-    try:
-        requests.post(FB_POSTING_API, params={'access_token': PAGE_ACCESS_TOKEN}, json={'message': message_text})
-    except Exception as e:
-        logging.error(f"Failed to post to page: {e}")
-
-# ==================== منطق الجدولة والنشر ====================
-
-def run_auto_post():
-    """تنفيذ النشر العشوائي (آية/حديث) على الصفحة كل ساعتين."""
-    content, source = get_random_content()
+    if not conn: return {"status": "inactive"}
     
-    # تنسيق الرسالة للنشر
-    message = f"**{content}**\n\nالمصدر: {source}\n\n#ناشر_الخير #بويكتا"
-    
-    logging.info(f"Attempting to post: {message}")
-    post_to_page(message)
-    
-
-def run_subscription_messages():
-    """إرسال محتوى الأذكار للمشتركين."""
-    conn = get_db_connection()
-    if not conn: 
-        logging.error("Cannot connect to DB for subscription messages.")
-        return
-    
-    # 1. الحصول على الذكر العشوائي
-    azkar_content = get_random_azkar()
-    if azkar_content == "لا يوجد ذكر لارساله حالياً.":
-        logging.warning("No Azkar content available to send.")
-        conn.close()
-        return
-        
-    # 2. سحب المشتركين النشطين
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute("SELECT psid FROM subscribers WHERE subscribed = TRUE")
-        subscribers = cursor.fetchall()
+        cursor.execute("SELECT status, location FROM subscribers WHERE user_id = %s", (user_id,))
+        user_data = cursor.fetchone()
         
-        message_data = {'text': f"💬 ذكر اليوم:\n\n{azkar_content}\n\nلإيقاف الإشعارات اضغط على زر 'إيقاف الإشعارات' في القائمة الرئيسية."}
-        
-        # 3. إرسال الرسائل
-        for sub in subscribers:
-            send_message(sub['psid'], message_data)
-        
-        logging.info(f"Sent Azkar message to {len(subscribers)} subscribers.")
-        
+        if user_data:
+            return user_data
+        return {"status": "inactive", "location": "N/A"}
     except mysql.connector.Error as err:
-        logging.error(f"Error fetching subscribers: {err}")
+        print(f"MySQL Error in get_subscriber_status: {err}")
+        return {"status": "inactive"}
     finally:
+        cursor.close()
         conn.close()
 
-# ==================== منطق الردود والأزرار ====================
 
-def get_welcome_buttons(user_id):
-    """بناء الأزرار التفاعلية."""
-    subscribed = is_subscribed(user_id)
-    sub_text = "🔔 إيقاف الإشعارات" if subscribed else "✅ تفعيل الإشعارات"
-    sub_payload = "ACTION_UNSUBSCRIBE" if subscribed else "ACTION_SUBSCRIBE"
-    
-    return [
-        {'type': 'postback', 'title': sub_text, 'payload': sub_payload},
-        {'type': 'postback', 'title': '📖 آية أو حديث عشوائي', 'payload': 'ACTION_RANDOM_CONTENT'},
-        {'type': 'postback', 'title': 'ℹ️ معلومات عن البوت والمطور', 'payload': 'ACTION_INFO'},
-    ]
+def toggle_subscription_status(user_id, current_status):
+    """[DB WRITE] تبديل حالة المشترك وتحديثها في جدول subscribers."""
+    conn = get_db_connection()
+    if not conn: return current_status
 
-def send_initial_menu(sender_id, custom_message=None):
-    """إرسال رسالة الترحيب ووصف الخدمات."""
-    message = custom_message if custom_message else "مرحباً! أنا بوت **ناشر الخير**، نظام آلي لخدمة نشر المحتوى الديني الموثوق...\n\nاختر من القائمة أدناه:"
-    buttons = get_welcome_buttons(sender_id)
-    
-    message_data = {
-        'attachment': {
-            'type': 'template',
-            'payload': {
-                'template_type': 'button',
-                'text': message,
-                'buttons': buttons
-            }
-        }
-    }
-    send_message(sender_id, message_data)
+    new_status = "inactive" if current_status == "active" else "active"
+    cursor = conn.cursor()
 
-def handle_postback(sender_id, payload):
-    """معالجة حدث Postback (الأزرار)."""
-    
-    if payload == 'ACTION_SUBSCRIBE':
-        toggle_subscription(sender_id, True)
-        send_initial_menu(sender_id, "تم تفعيل إشعارات الأذكار بنجاح! شكراً لك.")
-    
-    elif payload == 'ACTION_UNSUBSCRIBE':
-        toggle_subscription(sender_id, False)
-        send_initial_menu(sender_id, "تم إيقاف إشعارات الأذكار بنجاح. يمكنك تفعيلها مجدداً في أي وقت.")
-        
-    elif payload == 'ACTION_RANDOM_CONTENT':
-        content, source = get_random_content()
-        message = f"**{content}**\n\nالمصدر: {source}"
-        send_message(sender_id, {'text': message})
-        
-    elif payload == 'ACTION_INFO':
-        info_message = "🤖 أنا بوت **ناشر الخير**، مطور من قبل @boykta. مهمتي هي نشر المحتوى الديني الموثوق (أحاديث، آيات، أذكار) تلقائياً على صفحة فيسبوك وإرسال الأذكار للمشتركين."
-        send_message(sender_id, {'text': info_message})
-    
-    else:
-        send_initial_menu(sender_id) 
+    try:
+        # استخدام INSERT ... ON DUPLICATE KEY UPDATE لتغطية حالتي الإضافة والتعديل
+        sql = """
+        INSERT INTO subscribers (user_id, status, location) 
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE status = %s, location = %s
+        """
+        cursor.execute(sql, (user_id, new_status, "Riyadh", new_status, "Riyadh"))
+        conn.commit()
+        return new_status
+    except mysql.connector.Error as err:
+        print(f"MySQL Error in toggle_subscription_status: {err}")
+        conn.rollback()
+        return current_status
+    finally:
+        cursor.close()
+        conn.close()
 
-# ==================== نقاط النهاية (Endpoints) ====================
+def get_active_subscribers():
+    """[DB READ] جلب جميع الـ user_id للمشتركين النشطين."""
+    conn = get_db_connection()
+    if not conn: return []
+    
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT user_id FROM subscribers WHERE status = 'active'")
+        # يجب أن تكون النتيجة قائمة من القوائم أو الصفوف، لذا نقوم بتسطيحها
+        return [row[0] for row in cursor.fetchall()]
+    except mysql.connector.Error as err:
+        print(f"MySQL Error in get_active_subscribers: {err}")
+        return []
+    finally:
+        cursor.close()
+        conn.close()
+
+def get_publish_index():
+    """[DB READ] جلب مؤشر النشر الحالي من جدول settings."""
+    conn = get_db_connection()
+    if not conn: return 0
+    
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT value FROM settings WHERE `key` = 'publish_index'")
+        setting = cursor.fetchone()
+        return setting['value'] if setting else 0
+    except mysql.connector.Error as err:
+        print(f"MySQL Error in get_publish_index: {err}")
+        return 0
+    finally:
+        cursor.close()
+        conn.close()
+
+def update_publish_index(new_index):
+    """[DB WRITE] تحديث مؤشر النشر التالي في جدول settings."""
+    conn = get_db_connection()
+    if not conn: return 0
+    
+    cursor = conn.cursor()
+    try:
+        # استخدام INSERT ... ON DUPLICATE KEY UPDATE لتغطية حالتي الإضافة والتعديل
+        sql = """
+        INSERT INTO settings (`key`, `value`) 
+        VALUES ('publish_index', %s)
+        ON DUPLICATE KEY UPDATE `value` = %s
+        """
+        cursor.execute(sql, (new_index, new_index))
+        conn.commit()
+        return new_index
+    except mysql.connector.Error as err:
+        print(f"MySQL Error in update_publish_index: {err}")
+        conn.rollback()
+        return 0
+    finally:
+        cursor.close()
+        conn.close()
+
+# -----------------------------------------------------------------
+# --- وظائف المحتوى والـ Webhook (بدون تغيير، حيث تعتمد على الملفات المرفقة) ---
+# (تم إبقاء الدوال التالية كما هي من الكود السابق، مع الإشارة إلى أنها تستخدم الآن MySQL)
+
+def load_data(file_key):
+    """تحميل بيانات ملف JSON المرفق."""
+    # ... (كما في الكود السابق) ...
+    file_path = FILES.get(file_key)
+    if not file_path: return None
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        return None
+
+def get_random_post_content(current_index):
+    """اختيار محتوى عشوائي بالتبديل الدوري."""
+    # ... (كما في الكود السابق) ...
+    content_types = list(FILES.keys()) 
+    content_type = content_types[current_index % len(content_types)]
+    data = load_data(content_type)
+    
+    if not data: return "⚠️ لا يمكن الوصول إلى قاعدة البيانات الدينية حاليًا.", content_type, 1
+    post = ""
+    
+    # [منطق استخلاص المنشور من ملفات JSON]
+    if content_type == 'quran':
+        surah = random.choice(data)
+        verse = random.choice(surah['verses'])
+        post = ("﷽\n\n" f"**{verse['text']}**\n\n" f"| {surah['name']} - الآية {verse['id']} |\n")
+    elif content_type in ['bukhari', 'muslim', 'nasai']:
+        book_title_ar = data['metadata']['arabic']['title']
+        hadith_list = []
+        for chapter in data.get('chapters', []):
+            if 'hadiths' in chapter:
+                hadith_list.extend(chapter['hadiths'])
+        if hadith_list:
+            hadith = random.choice(hadith_list)
+            text = hadith.get('arabic', {}).get('text', "نص الحديث غير متوفر")
+            narrator_arabic = hadith.get('arabic', {}).get('narrator', "الراوي غير متوفر")
+            post = ("﷽\n\n" f"**« {text} »**\n\n" f"---" f"**الراوي:** {narrator_arabic}\n" f"**المصدر والمكان:** {book_title_ar}")
+        else:
+            post = f"لم نتمكن من العثور على أحاديث لغة عربية في المصدر: {book_title_ar}."
+    elif content_type == 'azkar':
+        if data and data.get('rows'):
+            zekr_row = random.choice(data['rows'])
+            zekr = zekr_row[1]
+            reference = zekr_row[4]
+            category = zekr_row[0]
+            post = ("﷽\n\n" f"**{zekr}**\n\n" f"---" f"**النوع:** {category}\n" f"**المصدر:** {reference}")
+
+    post += f"\n\n#ناشر_الخير #بويكتا"
+    next_index = current_index + 1
+    return post, content_type, next_index
+
+def post_to_facebook_page(message):
+    url = f"https://graph.facebook.com/v18.0/me/feed"
+    payload = {'message': message, 'access_token': PAGE_ACCESS_TOKEN}
+    response = requests.post(url, data=payload)
+    return response.status_code == 200
+
+def send_messenger_message(recipient_id, message_text, quick_replies=None):
+    params = {"access_token": PAGE_ACCESS_TOKEN}
+    headers = {"Content-Type": "application/json"}
+    message_data = {"text": message_text}
+    if quick_replies: message_data["quick_replies"] = quick_replies
+    data = {"recipient": {"id": recipient_id}, "message": message_data}
+    requests.post("https://graph.facebook.com/v18.0/me/messages", params=params, headers=headers, data=json.dumps(data))
+
+# --- نقاط نهاية الـ Webhook الرئيسية ---
 
 @app.route('/webhook', methods=['GET'])
-def verify():
-    # التحقق من التوكين
-    if request.args.get("hub.mode") == "subscribe" and request.args.get("hub.challenge"):
-        if not request.args.get("hub.verify_token") == VERIFY_TOKEN:
-            return "Verification token mismatch", 403
-        return request.args.get("hub.challenge"), 200
-    return "Hello World", 200
+def verify_webhook():
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    if mode and token and mode == "subscribe" and token == VERIFY_TOKEN:
+        return challenge, 200
+    return "OK", 200
 
 @app.route('/webhook', methods=['POST'])
-def handle_facebook_events():
-    data = request.get_json()
-    if 'object' in data and data['object'] == 'page':
-        for entry in data['entry']:
-            for event in entry.get('messaging', []):
-                sender_id = event['sender']['id']
-                if event.get('message'):
-                    send_initial_menu(sender_id) # عرض القائمة عند استلام رسالة نصية
-                elif event.get('postback'):
-                    handle_postback(sender_id, event['postback']['payload'])
+def handle_webhook():
+    data = request.json
+    for entry in data.get("entry", []):
+        for messaging_event in entry.get("messaging", []):
+            sender_id = messaging_event["sender"]["id"]
+            if messaging_event.get("postback"):
+                handle_postback(sender_id, messaging_event["postback"].get("payload"))
+            elif messaging_event.get("message") and not messaging_event["message"].get("is_echo"):
+                handle_message(sender_id, messaging_event["message"])
     return "OK", 200
 
-@app.route('/api/trigger', methods=['GET'])
-def external_cron_trigger():
-    """نقطة نهاية سري يُستخدم لاستدعاء الجدولة من خدمة خارجية."""
-    if request.args.get('secret_token') != CRON_SECRET_TOKEN:
-        return jsonify({"status": "error", "message": "Unauthorized access."}), 403
+@app.route('/handle_postback', methods=['POST'])
+def handle_postback(sender_id, payload):
+    quick_replies = [
+        {"content_type": "text", "title": "🔔 تفعيل/إلغاء الإشعارات", "payload": "TOGGLE_NOTIFICATIONS"},
+        {"content_type": "text", "title": "ℹ️ معلومات عن الصفحة والمطور", "payload": "GET_INFO"},
+    ]
     
-    current_hour = datetime.datetime.now().hour
+    if payload == "TOGGLE_NOTIFICATIONS":
+        user_data = get_subscriber_status(sender_id)
+        current_status = user_data["status"]
+        new_status = toggle_subscription_status(sender_id, current_status)
+        message = f"تم **{'تفعيل' if new_status == 'active' else 'إلغاء'}** خدمة الإشعارات التلقائية بنجاح! شكراً لك."
     
-    # النشر التلقائي كل ساعتين (مثلاً 0, 2, 4, ...)
-    if current_hour % 2 == 0:
-        run_auto_post()
-    
-    # إرسال رسائل الأذكار (يمكنك تحديد ساعات محددة هنا إذا لزم الأمر)
-    run_subscription_messages()
+    elif payload == "GET_INFO":
+        message = ("🤖 **معلومات عن البوت والمطور**\n"
+                   "هذا البوت جزء من مشروع 'ناشر الخير' لتقديم محتوى ديني موثوق.\n"
+                   "المطور: يونس لعلجي (Younes Laldji)")
+    else:
+        message = "تم استلام أمر غير معروف."
         
-    return jsonify({"status": "success", "triggered_at": datetime.datetime.now().isoformat()}), 200
+    send_messenger_message(sender_id, message, quick_replies=quick_replies)
 
-# 🚨 يتم استدعاء تهيئة قاعدة البيانات وتحميل البيانات عند بدء تشغيل الخادم 🚨
-initialize_db()
-load_all_app_data()
+def handle_message(sender_id, message):
+    quick_replies = [
+        {"content_type": "text", "title": "🔔 تفعيل/إلغاء الإشعارات", "payload": "TOGGLE_NOTIFICATIONS"},
+        {"content_type": "text", "title": "ℹ️ معلومات عن الصفحة والمطور", "payload": "GET_INFO"},
+    ]
+    welcome_message = ("مرحباً بك في **بوت ناشر الخير** 🕌\n"
+                       "يرجى استخدام الأزرار أدناه للتحكم في خدمات الإشعارات: ")
+    send_messenger_message(sender_id, welcome_message, quick_replies=quick_replies)
 
-    return "OK", 200
 
-@app.route('/api/trigger', methods=['GET'])
-def external_cron_trigger():
-    """نقطة نهاية سري يُستخدم لاستدعاء الجدولة من خدمة خارجية."""
-    if request.args.get('secret_token') != CRON_SECRET_TOKEN:
-        return jsonify({"status": "error", "message": "Unauthorized access."}), 403
+# --- نقطة نهاية Cron Job للنشر الآلي على الصفحة ---
+
+@app.route('/api/publish', methods=['GET', 'POST'])
+def publish_scheduled_content():
     
-    # ... (منطق النشر كل ساعتين وإرسال الأذكار) ...
-    current_hour = datetime.datetime.now().hour
-    if current_hour % 2 == 0:
-        run_auto_post()
-    
-    run_subscription_messages()
+    try:
+        current_index = get_publish_index() # جلب المؤشر من MySQL
+        post_content, content_type, next_index = get_random_post_content(current_index)
         
-    return jsonify({"status": "success", "triggered_at": datetime.datetime.now().isoformat()}), 200
+        success = post_to_facebook_page(post_content)
+        
+        if success:
+            update_publish_index(next_index) # تحديث المؤشر في MySQL
+            return jsonify({"status": "Success", "message": f"Published {content_type}.", "next_index": next_index}), 200
+        else:
+            return jsonify({"status": "Failure", "message": "Failed to post to Facebook API."}), 500
 
-# 🚨 يتم استدعاء تهيئة قاعدة البيانات عند بدء تشغيل الخادم 🚨
-initialize_db()
+    except Exception as e:
+        return jsonify({"status": "Error", "message": str(e)}), 500
+
+# --- نقطة نهاية Cron Job لاشتراكات الماسنجر ---
+
+@app.route('/api/send_subscriptions', methods=['GET', 'POST'])
+def send_scheduled_subscriptions():
+    
+    current_hour = datetime.now().hour
+    if 5 <= current_hour < 12:
+        category_search = "أذكار الصباح"
+        message_type = "تذكير بالصباح"
+    elif 16 <= current_hour < 20:
+        category_search = "أذكار المساء"
+        message_type = "تذكير بالمساء"
+    else:
+        return jsonify({"status": "Skipped", "message": "No specific content for this time."}), 200
+
+    azkar_data = load_data('azkar')
+    
+    # ... (منطق استخلاص الذكر) ...
+    if azkar_data and azkar_data.get('rows'):
+        filtered_rows = [row for row in azkar_data['rows'] if row[0] == category_search]
+        if filtered_rows:
+            zekr_text = random.choice(filtered_rows)[1]
+            subscription_message = f"**حان الآن وقت {message_type}** 🌅\n\n{zekr_text}\n\n#ناشر_الخير"
+        else:
+            subscription_message = f"تذكير: لم نجد أذكار لفئة {category_search} حالياً."
+    else:
+        subscription_message = "تذكير: قاعدة بيانات الأذكار غير متاحة حالياً."
+    
+    # جلب المشتركين النشطين من MySQL
+    active_subscribers = get_active_subscribers()
+    sent_count = 0
+    
+    for user_id in active_subscribers:
+        send_messenger_message(user_id, subscription_message)
+        sent_count += 1
+            
+    return jsonify({"status": "Success", "message": f"Sent {message_type} to {sent_count} subscribers."}), 200
